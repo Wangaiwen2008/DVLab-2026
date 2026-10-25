@@ -59,3 +59,4 @@ with torch.no_grad():  # 测试不需要计算梯度
         correct += (predicted == target).sum().item()
 
 print(f"最终测试集准确率: {100 * correct / total:.2f}%")
+torch.save(model.state_dict(), 'mnist_model.pth')
