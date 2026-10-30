@@ -1,19 +1,104 @@
-# 深度视觉农业实验室 2026 秋招前期考核
+import tkinter as tk
+from PIL import Image, ImageDraw, ImageOps
+import torch
+import torch.nn as nn
 
-作者：王艾文
 
-## 项目说明
-本项目包含了 OKTI 图像压缩与解压算法的底层实现，以及基于 PyTorch 的 MNIST 手写数字识别模型与 GUI 可视化画板。
+# 1. 网络结构（必须和训练时一模一样）
+class CNNNet(nn.Module):
+    def __init__(self):
+        super(CNNNet, self).__init__()
+        self.conv1 = nn.Conv2d(1, 16, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(16, 32, kernel_size=3, padding=1)
+        self.pool = nn.MaxPool2d(2, 2)
+        self.fc1 = nn.Linear(32 * 7 * 7, 128)
+        self.fc2 = nn.Linear(128, 10)
+        self.relu = nn.ReLU()
 
-## 环境依赖
-运行本项目需要安装 PyTorch、Pillow、NumPy 等库。
+    def forward(self, x):
+        x = self.pool(self.relu(self.conv1(x)))
+        x = self.pool(self.relu(self.conv2(x)))
+        x = x.view(-1, 32 * 7 * 7)
+        x = self.relu(self.fc1(x))
+        x = self.fc2(x)
+        return x
 
-## 核心改进点与开发复盘
-在完成基础 Demo 后，我发现画板对鼠标手写的粗线条识别率不稳定（例如倾斜的“0”容易识别成“9”）。于是我查阅资料，对 `demo_app.py` 进行了两处深度优化：
-1. 动态画笔缩放：加入了按比例自适应缩放逻辑，防止用户画的数字在缩放至 28x28 时发生形变。
-2. 图像二值化预处理：加入了二值化过滤，使鼠标绘制的粗线条更接近 MNIST 数据集的细线条特征。
 
-## 局限性与失败案例分析
-尽管加入了预处理，但在实际测试中，由于鼠标作画的线条粗细、倾斜度与标准数据集存在巨大差异（Domain Gap），模型仍会出现误判。
-原因剖析：目前使用的是全连接神经网络（MLP），它缺乏卷积核的空间特征提取能力，对图像的“旋转”和“倾斜”极其敏感。
-未来改进方向：将模型升级为 CNN（卷积神经网络），或在预处理中引入 OpenCV 的形态学细化（Thinning），以提升模型对形变的鲁棒性。
+# 加载模型
+model = CNNNet()
+model.load_state_dict(torch.load('mnist_model.pth'))
+model.eval()
+
+
+# 2. 界面和画板逻辑
+class App:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("手写数字识别 Demo (CNN增强版)")
+
+        self.canvas = tk.Canvas(root, width=280, height=280, bg='white', cursor='cross')
+        self.canvas.pack(pady=10)
+        self.canvas.bind("<B1-Motion>", self.paint)
+
+        self.btn_predict = tk.Button(root, text="识别数字", command=self.predict, font=("Arial", 14))
+        self.btn_predict.pack(side=tk.LEFT, padx=20, pady=10)
+
+        self.btn_clear = tk.Button(root, text="清空画板", command=self.clear, font=("Arial", 14))
+        self.btn_clear.pack(side=tk.RIGHT, padx=20, pady=10)
+
+        self.label_result = tk.Label(root, text="请在画板上写数字", font=("Arial", 16), fg="blue")
+        self.label_result.pack(pady=10)
+
+        self.image = Image.new("L", (280, 280), color=255)
+        self.draw = ImageDraw.Draw(self.image)
+
+    def paint(self, event):
+        r = 6
+        x1, y1 = (event.x - r), (event.y - r)
+        x2, y2 = (event.x + r), (event.y + r)
+        self.canvas.create_oval(x1, y1, x2, y2, fill="black", outline="black")
+        self.draw.ellipse([x1, y1, x2, y2], fill="black")
+
+    def clear(self):
+        self.canvas.delete("all")
+        self.image = Image.new("L", (280, 280), color=255)
+        self.draw = ImageDraw.Draw(self.image)
+        self.label_result.config(text="请在画板上写数字", fg="blue")
+
+    def predict(self):
+        bbox = self.image.getbbox()
+        if not bbox:
+            return
+
+        img = self.image.crop(bbox)
+
+        w, h = img.size
+        if w > h:
+            new_w = 20
+            new_h = int(h * (20 / w))
+        else:
+            new_h = 20
+            new_w = int(w * (20 / h))
+        img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+        img_new = Image.new("L", (28, 28), color=255)
+        img_new.paste(img, ((28 - new_w) // 2, (28 - new_h) // 2))
+
+        img_binary = img_new.point(lambda x: 0 if x < 128 else 255, '1')
+
+        img_inverted = ImageOps.invert(img_binary.convert("L"))
+        tensor = torch.tensor(list(img_inverted.getdata()), dtype=torch.float32).view(1, 1, 28, 28) / 255.0
+
+        with torch.no_grad():
+            output = model(tensor)
+            _, predicted = torch.max(output.data, 1)
+            prob = torch.softmax(output, dim=1)[0][predicted[0]].item()
+
+        self.label_result.config(text=f"识别结果: {predicted.item()} (概率: {prob:.2f})", fg="green")
+
+
+if __name__ == '__main__':
+    root = tk.Tk()
+    root.geometry("350x450")
+    app = App(root)
+    root.mainloop()

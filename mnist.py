@@ -34,7 +34,7 @@ criterion = nn.CrossEntropyLoss()  # 损失函数
 optimizer = optim.Adam(model.parameters(), lr=0.001)  # 优化器
 
 print("开始训练模型，请稍候...")
-for epoch in range(2):  # 只训练2轮，又快又好
+for epoch in range(10):  # 只训练2轮，又快又好
     for batch_idx, (data, target) in enumerate(train_loader):
         optimizer.zero_grad()
         output = model(data)
